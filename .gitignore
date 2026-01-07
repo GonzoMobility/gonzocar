@@ -8,6 +8,11 @@ agents.md
 readme.md
 claude.md
 CHECKLIST.md
+samples/
+
+# Gmail OAuth (secret)
+credentials.json
+token.json
 
 # Python
 venv/

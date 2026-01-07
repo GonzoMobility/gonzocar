@@ -132,9 +132,11 @@ class PaymentResponse(BaseModel):
     id: UUID
     source: str
     amount: float
-    sender_identifier: str
+    sender_name: Optional[str] = None
+    sender_identifier: Optional[str] = None
     transaction_id: Optional[str] = None
-    email_date: Optional[datetime] = None
+    memo: Optional[str] = None
+    received_at: Optional[datetime] = None
     matched: bool
     driver_id: Optional[UUID] = None
     created_at: datetime

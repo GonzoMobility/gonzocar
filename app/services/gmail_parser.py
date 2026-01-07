@@ -1,1 +1,349 @@
-# Gmail API integration and payment email parsing
+"""
+Payment Email Parser Service
+
+Parses payment notification emails from:
+- Zelle (via Chase)
+- CashApp (Square)
+- Venmo
+- Chime
+- Stripe
+"""
+
+import re
+import email
+from email import policy
+from email.parser import BytesParser
+from datetime import datetime
+from typing import Optional
+from dataclasses import dataclass
+
+
+@dataclass
+class ParsedPayment:
+    """Parsed payment data from email."""
+    source: str  # zelle, cashapp, venmo, chime, stripe
+    amount: float
+    sender_name: str
+    sender_identifier: Optional[str]  # email, phone, or username
+    transaction_id: Optional[str]
+    memo: Optional[str]
+    received_at: datetime
+    raw_email_id: Optional[str] = None
+
+
+def decode_email_content(msg: email.message.Message) -> str:
+    """Extract and decode email body (HTML preferred, then plain text)."""
+    body = ""
+    
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            if content_type == "text/html":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body = payload.decode(charset, errors='replace')
+                    break
+            elif content_type == "text/plain" and not body:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body = payload.decode(charset, errors='replace')
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or 'utf-8'
+            body = payload.decode(charset, errors='replace')
+    
+    # Decode quoted-printable artifacts
+    body = body.replace('=\r\n', '').replace('=\n', '')
+    body = re.sub(r'=([0-9A-Fa-f]{2})', lambda m: chr(int(m.group(1), 16)), body)
+    
+    return body
+
+
+def parse_email_date(msg: email.message.Message) -> datetime:
+    """Parse email date header."""
+    date_str = msg.get('Date', '')
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(date_str)
+    except Exception:
+        return datetime.utcnow()
+
+
+class ZelleParser:
+    """Parse Zelle payment emails from Chase."""
+    
+    @staticmethod
+    def can_parse(from_addr: str, subject: str) -> bool:
+        return 'chase.com' in from_addr.lower() and 'zelle' in subject.lower()
+    
+    @staticmethod
+    def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
+        try:
+            # Sender name: "<h1>NAME sent you money"
+            sender_match = re.search(r'<h1[^>]*>\s*([A-Z][A-Z\s]+)\s+sent you money', body, re.IGNORECASE)
+            sender_name = sender_match.group(1).strip().title() if sender_match else "Unknown"
+            
+            # Amount: ">$XXX.XX</td>" in table
+            amount_match = re.search(r'>\$?([\d,]+\.?\d*)</td>', body)
+            amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+            
+            # Transaction number
+            tx_match = re.search(r'Transaction number</td>.*?>(\d+)</td>', body, re.DOTALL)
+            transaction_id = tx_match.group(1) if tx_match else None
+            
+            # Memo
+            memo_match = re.search(r'Memo</td>.*?>([^<]+)</td>', body, re.DOTALL)
+            memo = memo_match.group(1).strip() if memo_match else None
+            if memo and memo.lower() == 'n/a':
+                memo = None
+            
+            return ParsedPayment(
+                source='zelle',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,  # Zelle doesn't provide email/phone in notification
+                transaction_id=transaction_id,
+                memo=memo,
+                received_at=parse_email_date(msg)
+            )
+        except Exception as e:
+            print(f"Zelle parse error: {e}")
+            return None
+
+
+class CashAppParser:
+    """Parse CashApp payment emails from Square."""
+    
+    @staticmethod
+    def can_parse(from_addr: str, subject: str) -> bool:
+        return 'square.com' in from_addr.lower() or 'cash app' in from_addr.lower()
+    
+    @staticmethod
+    def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
+        try:
+            subject = msg.get('Subject', '')
+            
+            # From subject: "Name sent you $XX for note"
+            subj_match = re.search(r'(.+?)\s+sent you \$?([\d,]+\.?\d*)', subject)
+            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
+            amount = float(subj_match.group(2).replace(',', '')) if subj_match else 0.0
+            
+            # Note from subject
+            note_match = re.search(r'sent you \$[\d,]+\.?\d*\s+for\s+(.+)$', subject)
+            memo = note_match.group(1).strip() if note_match else None
+            
+            # Transaction ID: "#X-XXXXXXXX"
+            tx_match = re.search(r'#([A-Z0-9-]+)</span>', body)
+            transaction_id = tx_match.group(1) if tx_match else None
+            
+            # Fallback: get from body if subject parsing failed
+            if amount == 0.0:
+                amount_match = re.search(r'\+\s*\$?([\d,]+\.?\d*)', body)
+                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+            
+            return ParsedPayment(
+                source='cashapp',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,  # CashApp uses $cashtag, not visible in email
+                transaction_id=transaction_id,
+                memo=memo,
+                received_at=parse_email_date(msg)
+            )
+        except Exception as e:
+            print(f"CashApp parse error: {e}")
+            return None
+
+
+class VenmoParser:
+    """Parse Venmo payment emails."""
+    
+    @staticmethod
+    def can_parse(from_addr: str, subject: str) -> bool:
+        return 'venmo.com' in from_addr.lower()
+    
+    @staticmethod
+    def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
+        try:
+            subject = msg.get('Subject', '')
+            
+            # From subject: "Name paid you $XX.XX"
+            subj_match = re.search(r'(.+?)\s+paid you \$?([\d,]+\.?\d*)', subject)
+            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
+            amount = float(subj_match.group(2).replace(',', '')) if subj_match else 0.0
+            
+            # Transaction ID from body
+            tx_match = re.search(r'Transaction ID</h3>.*?>([\d]+)<', body, re.DOTALL)
+            transaction_id = tx_match.group(1) if tx_match else None
+            
+            # Note from body (emoji or text)
+            note_match = re.search(r'transaction-note[^>]*>([^<]+)<', body)
+            memo = note_match.group(1).strip() if note_match else None
+            
+            return ParsedPayment(
+                source='venmo',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,  # @username not reliably in emails
+                transaction_id=transaction_id,
+                memo=memo,
+                received_at=parse_email_date(msg)
+            )
+        except Exception as e:
+            print(f"Venmo parse error: {e}")
+            return None
+
+
+class ChimeParser:
+    """Parse Chime payment emails."""
+    
+    @staticmethod
+    def can_parse(from_addr: str, subject: str) -> bool:
+        return 'chime.com' in from_addr.lower()
+    
+    @staticmethod
+    def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
+        try:
+            subject = msg.get('Subject', '')
+            
+            # From subject: "Name just sent you money"
+            subj_match = re.search(r'(.+?)\s+just sent you money', subject)
+            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
+            
+            # Amount and note from body: "received $XX.XX from Name for Note"
+            body_match = re.search(
+                r'received\s+\$?([\d,]+\.?\d*)\s+from\s+<strong[^>]*>([^<]+)</strong>.*?for\s+<strong[^>]*>([^<]+)</strong>',
+                body, re.DOTALL
+            )
+            
+            if body_match:
+                amount = float(body_match.group(1).replace(',', ''))
+                memo = body_match.group(3).strip()
+            else:
+                # Fallback
+                amount_match = re.search(r'\$?([\d,]+\.?\d*)\s+from', body)
+                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+                memo = None
+            
+            return ParsedPayment(
+                source='chime',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,
+                transaction_id=None,  # Chime doesn't provide transaction ID in email
+                memo=memo,
+                received_at=parse_email_date(msg)
+            )
+        except Exception as e:
+            print(f"Chime parse error: {e}")
+            return None
+
+
+class StripeParser:
+    """Parse Stripe payment emails."""
+    
+    @staticmethod
+    def can_parse(from_addr: str, subject: str) -> bool:
+        return 'stripe.com' in from_addr.lower()
+    
+    @staticmethod
+    def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
+        try:
+            subject = msg.get('Subject', '')
+            
+            # From subject: "Payment of $XXX.XX from Name for Account"
+            subj_match = re.search(r'Payment of \$?([\d,]+\.?\d*)\s+from\s+(.+?)\s+for', subject)
+            
+            if subj_match:
+                amount = float(subj_match.group(1).replace(',', ''))
+                sender_name = subj_match.group(2).strip()
+            else:
+                # Fallback from body
+                amount_match = re.search(r'\$?([\d,]+\.?\d*)\s+(?:—|-)\s+pi_', body)
+                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+                sender_name = "Unknown"
+            
+            # Transaction ID: pi_XXXX
+            tx_match = re.search(r'(pi_[A-Za-z0-9]+)', body)
+            transaction_id = tx_match.group(1) if tx_match else None
+            
+            return ParsedPayment(
+                source='stripe',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,
+                transaction_id=transaction_id,
+                memo=None,  # Stripe doesn't have memo in email
+                received_at=parse_email_date(msg)
+            )
+        except Exception as e:
+            print(f"Stripe parse error: {e}")
+            return None
+
+
+# Parser registry
+PARSERS = [
+    ZelleParser,
+    CashAppParser,
+    VenmoParser,
+    ChimeParser,
+    StripeParser,
+]
+
+
+def parse_email(raw_email: bytes) -> Optional[ParsedPayment]:
+    """
+    Parse a raw email (.eml) and extract payment information.
+    
+    Args:
+        raw_email: Raw email bytes (from .eml file or Gmail API)
+    
+    Returns:
+        ParsedPayment if successfully parsed, None otherwise
+    """
+    try:
+        msg = BytesParser(policy=policy.default).parsebytes(raw_email)
+        
+        from_addr = msg.get('From', '')
+        subject = msg.get('Subject', '')
+        body = decode_email_content(msg)
+        
+        # Find appropriate parser
+        for parser_class in PARSERS:
+            if parser_class.can_parse(from_addr, subject):
+                return parser_class.parse(msg, body)
+        
+        return None  # No parser matched
+        
+    except Exception as e:
+        print(f"Email parse error: {e}")
+        return None
+
+
+def parse_eml_file(file_path: str) -> Optional[ParsedPayment]:
+    """Parse a .eml file and extract payment information."""
+    with open(file_path, 'rb') as f:
+        return parse_email(f.read())
+
+
+# For testing
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+        result = parse_eml_file(file_path)
+        if result:
+            print(f"Source: {result.source}")
+            print(f"Amount: ${result.amount:.2f}")
+            print(f"Sender: {result.sender_name}")
+            print(f"Transaction ID: {result.transaction_id}")
+            print(f"Memo: {result.memo}")
+            print(f"Date: {result.received_at}")
+        else:
+            print("Failed to parse email")
+    else:
+        print("Usage: python gmail_parser.py <path-to-eml-file>")
