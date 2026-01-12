@@ -27,5 +27,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       
+      - name: Create Gmail credentials files
+        run: |
+          echo '${{ secrets.GMAIL_CREDENTIALS }}' > credentials.json
+          echo '${{ secrets.GMAIL_TOKEN }}' > token.json
+      
       - name: Run payment parser
         run: python scripts/parse_payments.py
