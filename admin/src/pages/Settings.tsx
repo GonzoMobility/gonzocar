@@ -1,7 +1,40 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
+
+interface SystemStatus {
+    database: { status: string; message: string };
+    openphone: { status: string; message: string };
+    gmail: { status: string; message: string };
+}
 
 export default function Settings() {
     const { user } = useAuth();
+    const [status, setStatus] = useState<SystemStatus | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        loadStatus();
+    }, []);
+
+    async function loadStatus() {
+        try {
+            const data = await api.getSystemStatus();
+            setStatus(data);
+        } catch (error) {
+            console.error('Failed to load status:', error);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    function getStatusBadge(s: { status: string; message: string } | undefined) {
+        if (!s) return <span className="badge pending">Loading...</span>;
+
+        const badgeClass = s.status === 'ok' ? 'approved' :
+            s.status === 'warning' ? 'hold' : 'declined';
+        return <span className={`badge ${badgeClass}`}>{s.message}</span>;
+    }
 
     return (
         <div>
@@ -38,7 +71,26 @@ export default function Settings() {
                 </div>
 
                 <div className="card">
-                    <h3 className="card-title" style={{ marginBottom: '1rem' }}>System Status</h3>
+                    <h3 className="card-title" style={{ marginBottom: '1rem' }}>
+                        System Status
+                        {!loading && (
+                            <button
+                                onClick={loadStatus}
+                                style={{
+                                    marginLeft: '1rem',
+                                    background: 'rgba(255,255,255,0.1)',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    padding: '0.25rem 0.5rem',
+                                    color: '#667eea',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem'
+                                }}
+                            >
+                                Refresh
+                            </button>
+                        )}
+                    </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'rgba(255,255,255,0.7)' }}>Backend API</span>
@@ -46,15 +98,15 @@ export default function Settings() {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'rgba(255,255,255,0.7)' }}>Database</span>
-                            <span className="badge approved">Connected</span>
+                            {getStatusBadge(status?.database)}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'rgba(255,255,255,0.7)' }}>Gmail API</span>
-                            <span className="badge approved">Configured</span>
+                            {getStatusBadge(status?.gmail)}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ color: 'rgba(255,255,255,0.7)' }}>OpenPhone SMS</span>
-                            <span className="badge pending">Needs API Key</span>
+                            {getStatusBadge(status?.openphone)}
                         </div>
                     </div>
                 </div>
@@ -86,26 +138,6 @@ export default function Settings() {
                                 </tr>
                             </tbody>
                         </table>
-                    </div>
-                </div>
-
-                <div className="card" style={{ gridColumn: 'span 2' }}>
-                    <h3 className="card-title" style={{ marginBottom: '1rem' }}>Environment Variables</h3>
-                    <div style={{
-                        background: 'rgba(0,0,0,0.3)',
-                        borderRadius: '8px',
-                        padding: '1rem',
-                        fontFamily: 'monospace',
-                        fontSize: '0.8rem',
-                        color: 'rgba(255,255,255,0.7)',
-                        lineHeight: '1.8',
-                    }}>
-                        <div><span style={{ color: '#10b981' }}>DATABASE_URL</span>=postgresql://...</div>
-                        <div><span style={{ color: '#10b981' }}>JWT_SECRET</span>=your-secret-key</div>
-                        <div><span style={{ color: '#10b981' }}>GMAIL_CLIENT_ID</span>=configured</div>
-                        <div><span style={{ color: '#10b981' }}>GMAIL_CLIENT_SECRET</span>=configured</div>
-                        <div><span style={{ color: '#f59e0b' }}>OPENPHONE_API_KEY</span>=not set</div>
-                        <div><span style={{ color: '#10b981' }}>OPENPHONE_PHONE_NUMBER</span>=+13123002032</div>
                     </div>
                 </div>
             </div>

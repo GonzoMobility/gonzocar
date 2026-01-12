@@ -153,6 +153,13 @@ class ApiService {
         if (!response.ok) throw new Error('Failed to assign payment');
         return response.json();
     }
+
+    // System Status
+    async getSystemStatus() {
+        const response = await fetch(`${API_URL}/status`, { headers: this.headers() });
+        if (!response.ok) throw new Error('Failed to fetch status');
+        return response.json();
+    }
 }
 
 export const api = new ApiService();
