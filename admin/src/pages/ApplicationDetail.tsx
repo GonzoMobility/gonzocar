@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { useAuth } from '../context/AuthContext';
 
 interface Comment {
     id: string;
@@ -22,7 +21,6 @@ interface Application {
 export default function ApplicationDetail() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { user } = useAuth();
     const [application, setApplication] = useState<Application | null>(null);
     const [loading, setLoading] = useState(true);
     const [comment, setComment] = useState('');

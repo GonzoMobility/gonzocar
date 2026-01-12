@@ -1,17 +1,7 @@
-import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-
-interface Staff {
-    id: string;
-    email: string;
-    name: string;
-    role: string;
-    created_at: string;
-}
 
 export default function Settings() {
     const { user } = useAuth();
-    const [loading] = useState(false);
 
     return (
         <div>
