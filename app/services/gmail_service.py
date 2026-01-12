@@ -4,15 +4,15 @@ Gmail API Service
 Connects to Gmail API to fetch payment notification emails.
 Requires OAuth credentials from Google Cloud Console.
 
-Setup:
-1. Create project in Google Cloud Console
-2. Enable Gmail API
-3. Create OAuth 2.0 credentials (Desktop app)
-4. Download credentials.json
-5. Run this script once to authorize and get refresh token
+For production (Railway):
+    Set GMAIL_CREDENTIALS and GMAIL_TOKEN env variables as base64-encoded JSON.
+
+For local development:
+    Place credentials.json and token.json in project root.
 """
 
 import os
+import json
 import base64
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -34,6 +34,23 @@ PAYMENT_SENDERS = [
 ]
 
 
+def get_credentials_from_env():
+    """Load credentials from environment variables (for production)."""
+    creds_b64 = os.getenv('GMAIL_CREDENTIALS')
+    token_b64 = os.getenv('GMAIL_TOKEN')
+    
+    if not creds_b64 or not token_b64:
+        return None, None
+    
+    try:
+        creds_json = base64.b64decode(creds_b64).decode('utf-8')
+        token_json = base64.b64decode(token_b64).decode('utf-8')
+        return json.loads(creds_json), json.loads(token_json)
+    except Exception as e:
+        print(f"Error decoding credentials from env: {e}")
+        return None, None
+
+
 class GmailService:
     """Gmail API wrapper for fetching payment emails."""
     
@@ -47,15 +64,36 @@ class GmailService:
         """Authenticate with Gmail API using OAuth."""
         creds = None
         
-        # Load existing token
-        if os.path.exists(self.token_path):
+        # Try environment variables first (production)
+        creds_data, token_data = get_credentials_from_env()
+        
+        if token_data:
+            # Use credentials from env
+            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        elif os.path.exists(self.token_path):
+            # Fall back to file-based token (local development)
             creds = Credentials.from_authorized_user_file(self.token_path, SCOPES)
         
         # Refresh or get new credentials
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                # Update token in env if using env-based auth
+                if token_data:
+                    print("Token refreshed. Update GMAIL_TOKEN env variable with new token.")
+                    print(f"New token (base64): {base64.b64encode(creds.to_json().encode()).decode()}")
+                else:
+                    # Save refreshed token to file
+                    with open(self.token_path, 'w') as token:
+                        token.write(creds.to_json())
             else:
+                # Need new credentials - only works locally
+                if creds_data:
+                    raise RuntimeError(
+                        "Token expired and cannot refresh. "
+                        "Run setup locally and update GMAIL_TOKEN env variable."
+                    )
+                
                 if not os.path.exists(self.credentials_path):
                     raise FileNotFoundError(
                         f"credentials.json not found at {self.credentials_path}. "
@@ -66,9 +104,9 @@ class GmailService:
                 )
                 creds = flow.run_local_server(port=0)
             
-            # Save token for next run
-            with open(self.token_path, 'w') as token:
-                token.write(creds.to_json())
+                # Save token for next run
+                with open(self.token_path, 'w') as token:
+                    token.write(creds.to_json())
         
         self.service = build('gmail', 'v1', credentials=creds)
     
@@ -182,6 +220,14 @@ def setup_oauth():
         # Test connection
         profile = service.service.users().getProfile(userId='me').execute()
         print(f"Connected to: {profile.get('emailAddress')}")
+        
+        # Show base64 for Railway
+        print()
+        print("For Railway deployment, set these env variables:")
+        with open(credentials_path, 'r') as f:
+            print(f"GMAIL_CREDENTIALS={base64.b64encode(f.read().encode()).decode()}")
+        with open('token.json', 'r') as f:
+            print(f"GMAIL_TOKEN={base64.b64encode(f.read().encode()).decode()}")
         
     except Exception as e:
         print(f"Error: {e}")

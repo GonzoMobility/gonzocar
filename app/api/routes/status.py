@@ -48,7 +48,14 @@ def check_openphone() -> dict:
 
 def check_gmail() -> dict:
     """Check Gmail API configuration."""
-    # Check if credentials files exist or env vars are set
+    # Check env variables first (production)
+    creds_env = os.getenv("GMAIL_CREDENTIALS")
+    token_env = os.getenv("GMAIL_TOKEN")
+    
+    if creds_env and token_env:
+        return {"status": "ok", "message": "Configured"}
+    
+    # Check if credentials files exist (local)
     creds_exists = os.path.exists("credentials.json")
     token_exists = os.path.exists("token.json")
     
