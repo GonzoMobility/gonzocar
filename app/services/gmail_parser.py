@@ -82,20 +82,37 @@ class ZelleParser:
     @staticmethod
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
         try:
-            # Sender name: "<h1>NAME sent you money"
-            sender_match = re.search(r'<h1[^>]*>\s*([A-Z][A-Z\s]+)\s+sent you money', body, re.IGNORECASE)
+            # 1. Sender name
+            # Pattern A: "<h1>NAME sent you money"
+            sender_match = re.search(r'<h1[^>]*>\s*([A-Za-z\s]+)\s+sent you money', body, re.IGNORECASE)
+            
+            # Pattern B: "You received $X from NAME"
+            if not sender_match:
+                sender_match = re.search(r'You received \$[\d,]+\.?\d* from ([A-Za-z\s]+)', body, re.IGNORECASE)
+                
             sender_name = sender_match.group(1).strip().title() if sender_match else "Unknown"
             
-            # Amount: ">$XXX.XX</td>" in table
-            amount_match = re.search(r'>\$?([\d,]+\.?\d*)</td>', body)
+            # 2. Amount
+            # Pattern A: ">$XXX.XX</td>" in table
+            amount_match = re.search(r'>\s*\$?([\d,]+\.?\d*)\s*</td>', body)
+            
+            # Pattern B: Plain text "$XXX.XX"
+            if not amount_match:
+                amount_match = re.search(r'Amount:?\s*\$?([\d,]+\.?\d*)', body, re.IGNORECASE)
+                
             amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
             
-            # Transaction number
-            tx_match = re.search(r'Transaction number</td>.*?>(\d+)</td>', body, re.DOTALL)
+            # 3. Transaction number
+            tx_match = re.search(r'Transaction number</td>.*?>\s*(\d+)\s*</td>', body, re.DOTALL | re.IGNORECASE)
+            if not tx_match:
+                tx_match = re.search(r'Transaction number:?\s*(\d+)', body, re.IGNORECASE)
             transaction_id = tx_match.group(1) if tx_match else None
             
-            # Memo
-            memo_match = re.search(r'Memo</td>.*?>([^<]+)</td>', body, re.DOTALL)
+            # 4. Memo
+            memo_match = re.search(r'Memo</td>.*?>\s*([^<]+)\s*</td>', body, re.DOTALL | re.IGNORECASE)
+            if not memo_match:
+                memo_match = re.search(r'Memo:?\s*([^\n<]+)', body, re.IGNORECASE)
+                
             memo = memo_match.group(1).strip() if memo_match else None
             if memo and memo.lower() == 'n/a':
                 memo = None
@@ -104,7 +121,7 @@ class ZelleParser:
                 source='zelle',
                 amount=amount,
                 sender_name=sender_name,
-                sender_identifier=None,  # Zelle doesn't provide email/phone in notification
+                sender_identifier=None,
                 transaction_id=transaction_id,
                 memo=memo,
                 received_at=parse_email_date(msg)
@@ -125,30 +142,46 @@ class CashAppParser:
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
         try:
             subject = msg.get('Subject', '')
+            sender_name = "Unknown"
+            amount = 0.0
+            memo = None
             
-            # From subject: "Name sent you $XX for note"
-            subj_match = re.search(r'(.+?)\s+sent you \$?([\d,]+\.?\d*)', subject)
-            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
-            amount = float(subj_match.group(2).replace(',', '')) if subj_match else 0.0
+            # 1. Parse Subject
+            # Pattern A: "Name sent you $XX for note"
+            match_a = re.search(r'(.+?)\s+sent you \$?([\d,]+\.?\d*)', subject, re.IGNORECASE)
+            # Pattern B: "Cash App: You received $XX from Name"
+            match_b = re.search(r'received \$?([\d,]+\.?\d*)\s+from\s+(.+)', subject, re.IGNORECASE)
             
-            # Note from subject
-            note_match = re.search(r'sent you \$[\d,]+\.?\d*\s+for\s+(.+)$', subject)
-            memo = note_match.group(1).strip() if note_match else None
+            if match_a:
+                sender_name = match_a.group(1).strip()
+                amount = float(match_a.group(2).replace(',', ''))
+                # Extract memo if present
+                memo_match = re.search(r'sent you \$[\d,]+\.?\d*\s+for\s+(.+)$', subject, re.IGNORECASE)
+                memo = memo_match.group(1).strip() if memo_match else None
+            elif match_b:
+                amount = float(match_b.group(1).replace(',', ''))
+                # Name might have "for Note" at the end
+                name_part = match_b.group(2).strip()
+                if ' for ' in name_part:
+                    name_parts = name_part.split(' for ', 1)
+                    sender_name = name_parts[0].strip()
+                    memo = name_parts[1].strip()
+                else:
+                    sender_name = name_part
             
-            # Transaction ID: "#X-XXXXXXXX"
-            tx_match = re.search(r'#([A-Z0-9-]+)</span>', body)
+            # Clean up sender name if it captured "Cash App: " prefix
+            if sender_name.lower().startswith('cash app:'):
+                sender_name = sender_name[9:].strip()
+
+            # 2. Transaction ID
+            tx_match = re.search(r'#([A-Z0-9-]+)', body)
             transaction_id = tx_match.group(1) if tx_match else None
-            
-            # Fallback: get from body if subject parsing failed
-            if amount == 0.0:
-                amount_match = re.search(r'\+\s*\$?([\d,]+\.?\d*)', body)
-                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
             
             return ParsedPayment(
                 source='cashapp',
                 amount=amount,
                 sender_name=sender_name,
-                sender_identifier=None,  # CashApp uses $cashtag, not visible in email
+                sender_identifier=None,
                 transaction_id=transaction_id,
                 memo=memo,
                 received_at=parse_email_date(msg)
@@ -166,28 +199,41 @@ class VenmoParser:
         return 'venmo.com' in from_addr.lower()
     
     @staticmethod
+    def can_parse_body(body: str) -> bool:
+        return 'venmo' in body.lower()
+
+    @staticmethod
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
         try:
             subject = msg.get('Subject', '')
+            sender_name = "Unknown"
+            amount = 0.0
             
-            # From subject: "Name paid you $XX.XX"
-            subj_match = re.search(r'(.+?)\s+paid you \$?([\d,]+\.?\d*)', subject)
-            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
-            amount = float(subj_match.group(2).replace(',', '')) if subj_match else 0.0
+            # Pattern A: "Name paid you $XX.XX" (Subject)
+            subj_match = re.search(r'(.+?)\s+paid you \$?([\d,]+\.?\d*)', subject, re.IGNORECASE)
             
-            # Transaction ID from body
-            tx_match = re.search(r'Transaction ID</h3>.*?>([\d]+)<', body, re.DOTALL)
+            if subj_match:
+                sender_name = subj_match.group(1).strip()
+                amount = float(subj_match.group(2).replace(',', ''))
+            
+            # Transaction ID
+            tx_match = re.search(r'Transaction ID[:\s<]+(\d+)', body, re.IGNORECASE)
             transaction_id = tx_match.group(1) if tx_match else None
             
-            # Note from body (emoji or text)
-            note_match = re.search(r'transaction-note[^>]*>([^<]+)<', body)
+            # Note/Memo
+            note_match = re.search(r'Note:?\s*([^<]+)', body, re.IGNORECASE)
             memo = note_match.group(1).strip() if note_match else None
             
+            # Refine Memo if HTML 
+            if not memo:
+                note_html = re.search(r'transaction-note[^>]*>([^<]+)<', body)
+                memo = note_html.group(1).strip() if note_html else None
+
             return ParsedPayment(
                 source='venmo',
                 amount=amount,
                 sender_name=sender_name,
-                sender_identifier=None,  # @username not reliably in emails
+                sender_identifier=None,
                 transaction_id=transaction_id,
                 memo=memo,
                 received_at=parse_email_date(msg)
@@ -208,32 +254,42 @@ class ChimeParser:
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
         try:
             subject = msg.get('Subject', '')
+            sender_name = "Unknown"
+            amount = 0.0
+            memo = None
             
-            # From subject: "Name just sent you money"
-            subj_match = re.search(r'(.+?)\s+just sent you money', subject)
-            sender_name = subj_match.group(1).strip() if subj_match else "Unknown"
+            # Subject: "Name just sent you money"
+            subj_match = re.search(r'(.+?)\s+just sent you money', subject, re.IGNORECASE)
+            if subj_match:
+                sender_name = subj_match.group(1).strip()
             
-            # Amount and note from body: "received $XX.XX from Name for Note"
-            body_match = re.search(
-                r'received\s+\$?([\d,]+\.?\d*)\s+from\s+<strong[^>]*>([^<]+)</strong>.*?for\s+<strong[^>]*>([^<]+)</strong>',
-                body, re.DOTALL
-            )
+            # Body: "received $XX.XX from Name"
+            # Try to find amount first
+            amount_match = re.search(r'received\s+\$?([\d,]+\.?\d*)', body, re.IGNORECASE)
+            if amount_match:
+                amount = float(amount_match.group(1).replace(',', ''))
+
+            # Refine sender if unknown
+            if sender_name == "Unknown":
+                from_match = re.search(r'from\s+([A-Za-z\s]+)', body, re.IGNORECASE)
+                if from_match:
+                     clean_name = from_match.group(1).replace('through', '').strip()
+                     sender_name = clean_name
             
-            if body_match:
-                amount = float(body_match.group(1).replace(',', ''))
-                memo = body_match.group(3).strip()
-            else:
-                # Fallback
-                amount_match = re.search(r'\$?([\d,]+\.?\d*)\s+from', body)
-                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
-                memo = None
+            # Memo
+            memo_match = re.search(r'for\s+([^<.]+)', body, re.IGNORECASE)
+            if memo_match:
+                # heuristic to verify it's a memo and not generic text
+                candidate = memo_match.group(1).strip()
+                if len(candidate) < 50 and 'transaction' not in candidate.lower():
+                    memo = candidate
             
             return ParsedPayment(
                 source='chime',
                 amount=amount,
                 sender_name=sender_name,
                 sender_identifier=None,
-                transaction_id=None,  # Chime doesn't provide transaction ID in email
+                transaction_id=None,
                 memo=memo,
                 received_at=parse_email_date(msg)
             )
@@ -253,19 +309,26 @@ class StripeParser:
     def parse(msg: email.message.Message, body: str) -> Optional[ParsedPayment]:
         try:
             subject = msg.get('Subject', '')
+            sender_name = "Unknown"
+            amount = 0.0
             
-            # From subject: "Payment of $XXX.XX from Name for Account"
-            subj_match = re.search(r'Payment of \$?([\d,]+\.?\d*)\s+from\s+(.+?)\s+for', subject)
+            # Subject: "Payment of $XXX.XX from Name"
+            subj_match = re.search(r'Payment of \$?([\d,]+\.?\d*)\s+from\s+(.+)', subject, re.IGNORECASE)
             
             if subj_match:
                 amount = float(subj_match.group(1).replace(',', ''))
-                sender_name = subj_match.group(2).strip()
+                # Name might have "for Account"
+                name_part = subj_match.group(2)
+                if ' for ' in name_part:
+                    sender_name = name_part.split(' for ', 1)[0].strip()
+                else:
+                    sender_name = name_part.strip()
             else:
-                # Fallback from body
-                amount_match = re.search(r'\$?([\d,]+\.?\d*)\s+(?:—|-)\s+pi_', body)
-                amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
-                sender_name = "Unknown"
-            
+                # Fallback to body scan
+                amount_match = re.search(r'\$?([\d,]+\.?\d*)\s*USD', body)
+                if amount_match:
+                    amount = float(amount_match.group(1).replace(',', ''))
+
             # Transaction ID: pi_XXXX
             tx_match = re.search(r'(pi_[A-Za-z0-9]+)', body)
             transaction_id = tx_match.group(1) if tx_match else None
@@ -276,7 +339,7 @@ class StripeParser:
                 sender_name=sender_name,
                 sender_identifier=None,
                 transaction_id=transaction_id,
-                memo=None,  # Stripe doesn't have memo in email
+                memo=None,
                 received_at=parse_email_date(msg)
             )
         except Exception as e:
