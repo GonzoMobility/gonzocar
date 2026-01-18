@@ -35,17 +35,26 @@ def get_db() -> Session:
     return SessionLocal()
 
 
-def is_duplicate(db: Session, source: str, transaction_id: str) -> bool:
+def is_duplicate(db: Session, source: str, transaction_id: str, gmail_id: str = None) -> bool:
     """Check if payment already exists in database."""
-    if not transaction_id:
-        return False
-    
-    existing = db.query(PaymentRaw).filter(
-        PaymentRaw.source == source,
-        PaymentRaw.transaction_id == transaction_id
-    ).first()
-    
-    return existing is not None
+    # 1. Check by Transaction ID (if present)
+    if transaction_id:
+        existing = db.query(PaymentRaw).filter(
+            PaymentRaw.source == source,
+            PaymentRaw.transaction_id == transaction_id
+        ).first()
+        if existing:
+            return True
+
+    # 2. Check by Gmail ID (if present) - Robust fallback for same email
+    if gmail_id:
+        existing_by_gmail = db.query(PaymentRaw).filter(
+            PaymentRaw.gmail_id == gmail_id
+        ).first()
+        if existing_by_gmail:
+            return True
+            
+    return False
 
 
 def find_driver_by_alias(db: Session, sender_name: str, sender_identifier: str) -> Driver:
@@ -72,8 +81,9 @@ def find_driver_by_alias(db: Session, sender_name: str, sender_identifier: str) 
 def store_payment(db: Session, payment: ParsedPayment, gmail_id: str = None) -> PaymentRaw:
     """Store parsed payment in database."""
     # Check for duplicate
-    if is_duplicate(db, payment.source, payment.transaction_id):
-        print(f"  Skipping duplicate: {payment.source} {payment.transaction_id}")
+    # Check for duplicate
+    if is_duplicate(db, payment.source, payment.transaction_id, gmail_id):
+        print(f"  Skipping duplicate: {payment.source} {payment.transaction_id or gmail_id}")
         return None
     
     # Try to match with driver

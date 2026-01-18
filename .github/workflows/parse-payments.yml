@@ -9,7 +9,7 @@ on:
 env:
   DATABASE_URL: ${{ secrets.DATABASE_URL }}
   GMAIL_CREDENTIALS: ${{ secrets.GMAIL_CREDENTIALS }}
-  GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN }}
+  GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN_2 }}
 
 jobs:
   parse-payments:

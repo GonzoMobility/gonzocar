@@ -269,13 +269,20 @@ class VenmoParser:
             transaction_id = tx_match.group(1) if tx_match else None
             
             # Note/Memo
-            note_match = re.search(r'Note:?\s*([^<]+)', body, re.IGNORECASE)
-            memo = note_match.group(1).strip() if note_match else None
+            memo = None
             
-            # Refine Memo if HTML 
+            # 1. HTML extraction (Priority)
+            # Look for class="transaction-note"
+            note_html = re.search(r'class="[^"]*transaction-note[^"]*"[^>]*>\s*([^<]+)', body)
+            if note_html:
+                memo = note_html.group(1).strip()
+            
+            # 2. Text/Subject Fallback
             if not memo:
-                note_html = re.search(r'transaction-note[^>]*>([^<]+)<', body)
-                memo = note_html.group(1).strip() if note_html else None
+                # Require "Note:" to be at separate line or start of text, not inside a word like "transaction-note"
+                note_match = re.search(r'(?:^|[\n>])Note:\s*([^<]+)', body, re.IGNORECASE)
+                if note_match:
+                    memo = note_match.group(1).strip()
 
             # Validate
             if amount == 0.0 or sender_name == "Unknown":
@@ -329,12 +336,17 @@ class ChimeParser:
                      sender_name = clean_name
             
             # Memo
-            memo_match = re.search(r'for\s+([^<.]+)', body, re.IGNORECASE)
+            # Try HTML strong tag first: "for <strong>Car payment</strong>"
+            memo_match = re.search(r'for\s+<strong[^>]*>([^<]+)</strong>', body, re.IGNORECASE)
             if memo_match:
-                # heuristic to verify it's a memo and not generic text
-                candidate = memo_match.group(1).strip()
-                if len(candidate) < 50 and 'transaction' not in candidate.lower():
-                    memo = candidate
+                memo = memo_match.group(1).strip()
+            else:
+                # Fallback to text, but avoid HTML comments or long strings
+                memo_match = re.search(r'for\s+([^<.\n]+)', body, re.IGNORECASE)
+                if memo_match:
+                    candidate = memo_match.group(1).strip()
+                    if len(candidate) < 50 and 'transaction' not in candidate.lower() and '-->' not in candidate:
+                        memo = candidate
             
             # Validate
             if amount == 0.0 or sender_name == "Unknown":
@@ -345,7 +357,19 @@ class ChimeParser:
                 amount=amount,
                 sender_name=sender_name,
                 sender_identifier=None,
-                transaction_id=None,
+            # Transaction ID - Fallback to Email Message-ID since Chime doesn't consistently provide one in body
+            transaction_id = None
+            msg_id = msg.get('Message-ID')
+            if msg_id:
+                # Clean up ID: <12345@domain> -> 12345@domain
+                transaction_id = msg_id.strip('<>')
+
+            return ParsedPayment(
+                source='chime',
+                amount=amount,
+                sender_name=sender_name,
+                sender_identifier=None,
+                transaction_id=transaction_id,
                 memo=memo,
                 received_at=parse_email_date(msg)
             )
