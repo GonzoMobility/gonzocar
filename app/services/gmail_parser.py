@@ -345,7 +345,7 @@ class ChimeParser:
                 memo_match = re.search(r'for\s+([^<.\n]+)', body, re.IGNORECASE)
                 if memo_match:
                     candidate = memo_match.group(1).strip()
-                    if len(candidate) < 50 and 'transaction' not in candidate.lower() and '-->' not in candidate:
+                    if len(candidate) < 50 and 'transaction' not in candidate.lower() and '-->' not in candidate and 'most cases' not in candidate.lower():
                         memo = candidate
             
             # Validate
