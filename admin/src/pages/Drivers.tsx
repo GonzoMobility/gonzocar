@@ -169,7 +169,10 @@ export default function Drivers() {
                             {filteredDrivers.map((driver) => (
                                 <tr key={driver.id} style={{ borderTop: '1px solid var(--light-gray)' }}>
                                     <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 500, color: 'var(--dark-gray)' }}>
-                                        {driver.first_name} {driver.last_name}
+                                        {driver.first_name || driver.last_name
+                                            ? `${driver.first_name} ${driver.last_name}`.trim()
+                                            : <span style={{ opacity: 0.5, fontStyle: 'italic' }}>{driver.email || 'Unknown'}</span>
+                                        }
                                     </td>
                                     <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
                                         <div style={{ color: 'var(--dark-gray)' }}>{driver.email}</div>
