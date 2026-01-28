@@ -171,7 +171,7 @@ export default function Drivers() {
                                     <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 500, color: 'var(--dark-gray)' }}>
                                         {driver.first_name || driver.last_name
                                             ? `${driver.first_name} ${driver.last_name}`.trim()
-                                            : <span style={{ opacity: 0.5, fontStyle: 'italic' }}>{driver.email || 'Unknown'}</span>
+                                            : <span style={{ opacity: 0.6, fontStyle: 'italic' }}>{driver.email?.split('@')[0] || 'Unknown'}</span>
                                         }
                                     </td>
                                     <td style={{ padding: 'var(--space-2) var(--space-3)' }}>

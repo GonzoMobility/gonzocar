@@ -79,11 +79,27 @@ def update_status(
         form_data = application.form_data
         
         # Extract driver info from form data
+        first_name = form_data.get("first_name", "")
+        last_name = form_data.get("last_name", "")
+        
+        # Handle nested 'names' object (Fluent Forms compatibility)
+        if not first_name and not last_name:
+            # Try case-insensitive lookup for 'names'
+            names_obj = None
+            for key in form_data.keys():
+                if "name" in key.lower() and isinstance(form_data[key], dict):
+                    names_obj = form_data[key]
+                    break
+            
+            if names_obj:
+                first_name = names_obj.get("first_name") or names_obj.get("First_Name") or names_obj.get("first") or ""
+                last_name = names_obj.get("last_name") or names_obj.get("Last_Name") or names_obj.get("last") or ""
+
         driver = Driver(
-            first_name=form_data.get("first_name", ""),
-            last_name=form_data.get("last_name", ""),
+            first_name=first_name,
+            last_name=last_name,
             email=form_data.get("email", ""),
-            phone=form_data.get("phone", ""),
+            phone=form_data.get("phone", "") or form_data.get("phone_number", ""),
             billing_type=form_data.get("billing_type", "daily"),
             billing_rate=form_data.get("billing_rate", 0)
         )
