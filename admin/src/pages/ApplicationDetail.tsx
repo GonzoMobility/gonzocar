@@ -200,51 +200,81 @@ export default function ApplicationDetail() {
                     </h3>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
                         {Object.entries(formData).map(([key, value]) => {
-                            // Handle Name Fields (sometimes passed as object from Fluent Forms)
-                            let displayValue: React.ReactNode = String(value) || '-';
+                            // Smart Value Formatting
+                            let displayValue: React.ReactNode = '-';
 
-                            // If key contains 'name' and value is distinct object
-                            if (key.toLowerCase().includes('names') && typeof value === 'object' && value !== null) {
-                                // Try to extract first/last name if present in the object
-                                const nameObj = value as Record<string, unknown>;
-                                const first = nameObj.first_name || nameObj.First_Name || nameObj.first || '';
-                                const last = nameObj.last_name || nameObj.Last_Name || nameObj.last || '';
-                                if (first || last) {
+                            if (value === null || value === undefined || value === '') {
+                                displayValue = '-';
+                            } else if (typeof value === 'object') {
+                                // Handle Objects (Address, Name, Submission, etc.)
+                                const obj = value as Record<string, unknown>;
+
+                                // 1. Name Object
+                                if ((obj.first_name || obj.last_name || obj.First_Name || obj.Last_Name)) {
+                                    const first = (obj.first_name || obj.First_Name || obj.first || '') as string;
+                                    const last = (obj.last_name || obj.Last_Name || obj.last || '') as string;
                                     displayValue = `${first} ${last}`.trim();
-                                } else {
-                                    // Fallback to JSON string if structure is unknown
-                                    displayValue = JSON.stringify(value);
                                 }
-                            }
+                                // 2. Address Object (Fluent Forms style)
+                                else if (obj.address_line_1 || obj.city || obj.state || obj.zip) {
+                                    const addr1 = (obj.address_line_1 || '') as string;
+                                    const addr2 = (obj.address_line_2 || '') as string;
+                                    const city = (obj.city || '') as string;
+                                    const state = (obj.state || '') as string;
+                                    const zip = (obj.zip || '') as string;
+                                    displayValue = [addr1, addr2, city, state, zip].filter(Boolean).join(', ');
+                                }
+                                // 3. Generic Object (Submission metadata, etc.) - Strings preferred over JSON
+                                else {
+                                    // Try to find a meaningful label or ID
+                                    const label = obj.label || obj.name || obj.id || obj.title;
+                                    if (label && typeof label === 'string') {
+                                        displayValue = label;
+                                    } else {
+                                        // Fallback: prettier JSON or comma-joined values if flat object
+                                        const values = Object.values(obj).filter(v => typeof v === 'string' || typeof v === 'number');
+                                        if (values.length > 0 && values.length < 5) {
+                                            displayValue = values.join(', ');
+                                        } else {
+                                            displayValue = JSON.stringify(value);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Handle Primitives (Strings, Numbers)
+                                // Cast to string to handle checking for URLs
+                                const valStr = String(value);
 
-                            // Handle URLs (Render clickable links)
-                            // Cast to string to handle arrays or strings
-                            const valStr = String(value);
-                            if (valStr.includes('http')) {
-                                // Split by comma or newline to handle multiple files
-                                const urls = valStr.split(/[\n,]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
+                                if (valStr.includes('http')) {
+                                    // Handle URLs
+                                    const urls = valStr.split(/[\n,]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
 
-                                if (urls.length > 0) {
-                                    displayValue = (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                            {urls.map((url, idx) => (
-                                                <a
-                                                    key={idx}
-                                                    href={url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    style={{
-                                                        color: 'var(--primary-blue)',
-                                                        textDecoration: 'underline',
-                                                        wordBreak: 'break-all'
-                                                    }}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                >
-                                                    View Document {urls.length > 1 ? idx + 1 : ''}
-                                                </a>
-                                            ))}
-                                        </div>
-                                    );
+                                    if (urls.length > 0) {
+                                        displayValue = (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                {urls.map((url, idx) => (
+                                                    <a
+                                                        key={idx}
+                                                        href={url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        style={{
+                                                            color: 'var(--primary-blue)',
+                                                            textDecoration: 'underline',
+                                                            wordBreak: 'break-all'
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        View Document {urls.length > 1 ? idx + 1 : ''}
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        );
+                                    } else {
+                                        displayValue = valStr;
+                                    }
+                                } else {
+                                    displayValue = valStr;
                                 }
                             }
 
