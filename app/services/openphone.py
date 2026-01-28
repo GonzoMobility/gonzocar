@@ -29,7 +29,7 @@ class OpenPhoneService:
     
     def __init__(self):
         self.api_key = os.getenv("OPENPHONE_API_KEY")
-        self.phone_number = os.getenv("OPENPHONE_PHONE_NUMBER", "+13123002032")
+        self.phone_number = os.getenv("OPENPHONE_PHONE_NUMBER", "+13127362939")
         
         if not self.api_key:
             print("Warning: OPENPHONE_API_KEY not set")

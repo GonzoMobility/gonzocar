@@ -218,29 +218,33 @@ export default function ApplicationDetail() {
                             }
 
                             // Handle URLs (Render clickable links)
-                            if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
-                                // Handles multiple URLs separated by comma or newline if common in uploads
-                                const urls = value.split(/[\n,]+/).map(u => u.trim()).filter(Boolean);
-                                displayValue = (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        {urls.map((url, idx) => (
-                                            <a
-                                                key={idx}
-                                                href={url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                style={{
-                                                    color: 'var(--primary-blue)',
-                                                    textDecoration: 'underline',
-                                                    wordBreak: 'break-all'
-                                                }}
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                View Document {urls.length > 1 ? idx + 1 : ''}
-                                            </a>
-                                        ))}
-                                    </div>
-                                );
+                            // Check if value is a string and contains http (even if not at start, e.g. "foo.jpg, https://...")
+                            if (typeof value === 'string' && value.includes('http')) {
+                                // Split by comma or newline to handle multiple files
+                                const urls = value.split(/[\n,]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
+
+                                if (urls.length > 0) {
+                                    displayValue = (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                            {urls.map((url, idx) => (
+                                                <a
+                                                    key={idx}
+                                                    href={url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    style={{
+                                                        color: 'var(--primary-blue)',
+                                                        textDecoration: 'underline',
+                                                        wordBreak: 'break-all'
+                                                    }}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    View Document {urls.length > 1 ? idx + 1 : ''}
+                                                </a>
+                                            ))}
+                                        </div>
+                                    );
+                                }
                             }
 
                             return (
