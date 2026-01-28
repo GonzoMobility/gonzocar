@@ -36,7 +36,7 @@ export default function Dashboard() {
     async function loadData() {
         try {
             const [statsData, appsData, driversData] = await Promise.all([
-                api.getPaymentStats(),
+                api.getPaymentStats('weekly'),
                 api.getApplications('pending'),
                 api.getDrivers(),
             ]);

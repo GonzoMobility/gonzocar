@@ -15,7 +15,7 @@ export default function Layout() {
         <div className="layout">
             <aside className="sidebar">
                 <div className="sidebar-header">
-                    <h1>Gonzo</h1>
+                    <h1>Gonzo Car</h1>
                     <span>Admin Panel</span>
                 </div>
                 <nav className="sidebar-nav">

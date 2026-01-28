@@ -50,17 +50,62 @@ def list_all_payments(
 
 @router.get("/stats")
 def payment_stats(
+    period: str = "all",
     db: Session = Depends(get_db),
     current_user: Staff = Depends(get_current_user)
 ):
-    """Get payment statistics."""
-    total_count = db.query(PaymentRaw).count()
-    matched_count = db.query(PaymentRaw).filter(PaymentRaw.matched == True).count()
-    unmatched_count = db.query(PaymentRaw).filter(PaymentRaw.matched == False).count()
+    """
+    Get payment statistics.
+    Optional 'period' query param: 'all' (default) or 'weekly'.
+    'weekly' = Monday 9:00 AM NY time (current week) to next Monday.
+    """
+    query = db.query(PaymentRaw)
+    matched_query = db.query(PaymentRaw).filter(PaymentRaw.matched == True)
+    unmatched_query = db.query(PaymentRaw).filter(PaymentRaw.matched == False)
     
-    total_amount = db.query(func.sum(PaymentRaw.amount)).scalar() or 0
+    # Weekly Filter Logic
+    if period == "weekly":
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import timedelta
+        except ImportError:
+            # Fallback for older python if needed, though 3.9+ has zoneinfo
+            import pytz
+            ZoneInfo = lambda x: pytz.timezone(x)
+            
+        ny_tz = ZoneInfo("America/New_York")
+        utc_tz = ZoneInfo("UTC")
+        now_ny = datetime.now(ny_tz)
+        
+        # Calculate most recent Monday 9:00 AM NY
+        # Monday is 0 in weekday()
+        days_since_monday = now_ny.weekday()
+        monday_date = now_ny.date() - timedelta(days=days_since_monday)
+        
+        # Construct Monday 9:00 AM
+        # Note: replace with fold=0 to handle DST ambiguity if needed, usually fine
+        monday_9am = datetime.combine(monday_date, datetime.min.time()).replace(hour=9, tzinfo=ny_tz)
+        
+        # If current time is before Monday 9AM, we are in the "previous" week's cycle
+        if now_ny < monday_9am:
+            monday_9am -= timedelta(weeks=1)
+            
+        start_time_utc = monday_9am.astimezone(utc_tz).replace(tzinfo=None) # Naive UTC for DB
+        
+        query = query.filter(PaymentRaw.received_at >= start_time_utc)
+        matched_query = matched_query.filter(PaymentRaw.received_at >= start_time_utc)
+        unmatched_query = unmatched_query.filter(PaymentRaw.received_at >= start_time_utc)
+
+    total_count = query.count()
+    matched_count = matched_query.count()
+    unmatched_count = unmatched_query.count()
+    
+    total_amount = db.query(func.sum(PaymentRaw.amount)).filter(
+        PaymentRaw.id.in_(query.with_entities(PaymentRaw.id))
+    ).scalar() or 0
+    
     matched_amount = db.query(func.sum(PaymentRaw.amount)).filter(
-        PaymentRaw.matched == True
+        PaymentRaw.id.in_(matched_query.with_entities(PaymentRaw.id))
     ).scalar() or 0
     
     return {

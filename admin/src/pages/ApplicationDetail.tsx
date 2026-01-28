@@ -148,7 +148,21 @@ export default function ApplicationDetail() {
                             color: 'var(--dark-gray)',
                             marginBottom: 'var(--space-1)',
                         }}>
-                            {formData.first_name} {formData.last_name}
+                            {(() => {
+                                const fName = formData.first_name || formData.names; // Fallback to 'names' field if first_name is empty
+                                const lName = formData.last_name || '';
+
+                                // Helper to stringify if object
+                                const renderPart = (v: unknown) => {
+                                    if (typeof v === 'object' && v !== null) {
+                                        const obj = v as Record<string, string>;
+                                        return `${obj.first_name || ''} ${obj.last_name || ''}`.trim() || JSON.stringify(v);
+                                    }
+                                    return String(v || '');
+                                };
+
+                                return `${renderPart(fName)} ${renderPart(lName)}`.trim() || 'Unknown Applicant';
+                            })()}
                         </h1>
                         <p style={{ color: 'var(--dark-gray)', opacity: 0.7 }}>
                             Submitted on {new Date(application.created_at).toLocaleDateString()}
@@ -185,22 +199,67 @@ export default function ApplicationDetail() {
                         Application Details
                     </h3>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
-                        {Object.entries(formData).map(([key, value]) => (
-                            <div key={key}>
-                                <div style={{
-                                    color: 'var(--dark-gray)',
-                                    opacity: 0.6,
-                                    fontSize: '0.75rem',
-                                    textTransform: 'uppercase',
-                                    marginBottom: '4px',
-                                }}>
-                                    {key.replace(/_/g, ' ')}
+                        {Object.entries(formData).map(([key, value]) => {
+                            // Handle Name Fields (sometimes passed as object from Fluent Forms)
+                            let displayValue: React.ReactNode = String(value) || '-';
+
+                            // If key contains 'name' and value is distinct object
+                            if (key.toLowerCase().includes('names') && typeof value === 'object' && value !== null) {
+                                // Try to extract first/last name if present in the object
+                                const nameObj = value as Record<string, unknown>;
+                                const first = nameObj.first_name || nameObj.First_Name || nameObj.first || '';
+                                const last = nameObj.last_name || nameObj.Last_Name || nameObj.last || '';
+                                if (first || last) {
+                                    displayValue = `${first} ${last}`.trim();
+                                } else {
+                                    // Fallback to JSON string if structure is unknown
+                                    displayValue = JSON.stringify(value);
+                                }
+                            }
+
+                            // Handle URLs (Render clickable links)
+                            if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
+                                // Handles multiple URLs separated by comma or newline if common in uploads
+                                const urls = value.split(/[\n,]+/).map(u => u.trim()).filter(Boolean);
+                                displayValue = (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                        {urls.map((url, idx) => (
+                                            <a
+                                                key={idx}
+                                                href={url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{
+                                                    color: 'var(--primary-blue)',
+                                                    textDecoration: 'underline',
+                                                    wordBreak: 'break-all'
+                                                }}
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                View Document {urls.length > 1 ? idx + 1 : ''}
+                                            </a>
+                                        ))}
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div key={key}>
+                                    <div style={{
+                                        color: 'var(--dark-gray)',
+                                        opacity: 0.6,
+                                        fontSize: '0.75rem',
+                                        textTransform: 'uppercase',
+                                        marginBottom: '4px',
+                                    }}>
+                                        {key.replace(/_/g, ' ')}
+                                    </div>
+                                    <div style={{ color: 'var(--dark-gray)', fontWeight: 500 }}>
+                                        {displayValue}
+                                    </div>
                                 </div>
-                                <div style={{ color: 'var(--dark-gray)', fontWeight: 500 }}>
-                                    {String(value) || '-'}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
 

@@ -138,8 +138,9 @@ class ApiService {
         return response.json();
     }
 
-    async getPaymentStats() {
-        const response = await fetch(`${API_URL}/payments/stats`, { headers: this.headers() });
+    async getPaymentStats(period?: string) {
+        const url = period ? `${API_URL}/payments/stats?period=${period}` : `${API_URL}/payments/stats`;
+        const response = await fetch(url, { headers: this.headers() });
         if (!response.ok) throw new Error('Failed to fetch stats');
         return response.json();
     }

@@ -18,6 +18,7 @@ export default function Settings() {
     }, []);
 
     async function loadStatus() {
+        setLoading(true);
         try {
             const data = await api.getSystemStatus();
             setStatus(data);
